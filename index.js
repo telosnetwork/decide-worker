@@ -46,14 +46,14 @@ db.defaults(dbSchema)
 client.onConnect = () => {
 
     //openvoting action stream
-    // client.streamActions({
-    //     contract: 'telos.decide',
-    //     action: 'openvoting',
-    //     account: '',
-    //     start_from: 0,
-    //     read_until: 0,
-    //     filters: [],
-    // });
+    client.streamActions({
+        contract: 'telos.decide',
+        action: 'openvoting',
+        account: '',
+        start_from: 0,
+        read_until: 0,
+        filters: [],
+    });
 
     //closevoting action stream
     // client.streamActions({
@@ -105,17 +105,13 @@ client.onData = async (data) => {
             case 'openvoting':
                 //TASK: add ballot to ballots list in db
 
-                //initialize
-                const ballot = data.content.act.ballot_name;
-                const endTime = data.content.act.end_time;
-
                 //validate
                 //TODO: check ballot is VOTE
 
                 //define new ballot
                 const newBallot = {
-                    ballot_name: ballot,
-                    end_time: endTime
+                    ballot_name: data.content.act.data.ballot_name,
+                    end_time: data.content.act.data.end_time
                 };
 
                 //write new ballot
@@ -127,16 +123,12 @@ client.onData = async (data) => {
             case 'closevoting':
                 //TASK: remove ballot from ballots list in db
 
-                //initialize
-                const ballot = data.content.act.ballot_name;
-                // const did_broadcast = data.content.act.broadcast;
-
                 //validate
                 //TODO: check ballot is VOTE
 
                 //remove ballot from list
                 db.get('ballots')
-                    .remove({ ballot_name: ballot })
+                    .remove({ ballot_name: data.content.act.ballot_name })
                     .write()
 
                 break;
@@ -170,8 +162,8 @@ client.onData = async (data) => {
                     //if vote not found
                     if (res2 == 0) {
 
-                        //define new vote entry
-                        const new_vote_entry = {
+                        //define new vote
+                        const new_vote = {
                             ballot_name: ballot
                         };
 
@@ -179,14 +171,14 @@ client.onData = async (data) => {
                         db.get('watchlist')
                             .find({ account_name: voter })
                             .get('votes')
-                            .push(new_vote_entry)
+                            .push(new_vote)
                             .write()
 
                     } else { //if vote found
 
                         console.log('Vote Found. Skipping.');
 
-                        //TODO: check ballot status. if ended, remove ballot entry.
+                        //TODO: check ballot status. if ended, remove ballot.
 
                     }
 
@@ -221,24 +213,48 @@ client.onData = async (data) => {
 
         console.log('>>> Table Delta Received: ');
 
-        // console.log(data);
-
         //initialize
         const voter = data.content.scope;
+        let didFilter = false;
+        let filteredVotes = [];
 
         //get config info
         const conf = db.get('config')
             .value()
 
         //get account's vote list
-        const ballot_list = db.get('watchlist')
+        const votesList = db.get('watchlist')
             .find({ account_name: voter })
             .get('votes')
             .value()
 
-        //load action hopper
-        ballot_list.forEach(element => {
+        //filter votes list
+        votesList.forEach(element => {
+            //get ballot
+            const ballotQuery = db.get('ballots')
+                .find({ ballot_name: element.ballot_name })
+                .value()
 
+            //if ballotQuery not undefined (in votes list but not ballots list)
+            if (ballotQuery) {
+                //if ballot still active
+                if (Date.now() < Date.parse(ballotQuery.end_time)) {
+                    //define vote
+                    const newVote = {
+                        ballot_name: element.ballot_name
+                    };
+                    //add to filtered votes
+                    filteredVotes.push(newVote);
+                } else {
+                    didFilter = true;
+                }
+            } else { //ballot undefined
+                //TODO: fetch ballot from chain and add to db
+            }
+        });
+
+        //load action hopper
+        filteredVotes.forEach(element => {
             //define rebal action
             let rebal_action = {
                 account: 'telos.decide',
@@ -255,11 +271,18 @@ client.onData = async (data) => {
                     worker: conf.worker_account
                 }
             }
-
             //push action to hopper
             hopper.load(rebal_action);
-
         });
+
+        //if votes were filtered from vote list
+        if (didFilter) {
+            //set filteredVotes as new votes
+            db.get('watchlist')
+                .find({ account_name: voter })
+                .set('votes', filteredVotes)
+                .write()
+        }
 
         // const cosign_action = {
         //     account: 'energytester',
@@ -274,16 +297,17 @@ client.onData = async (data) => {
         //         account_owner: 'decideworker'
         //     }
         // };
-
         // hopper.frontload(cosign_action);
-
         // console.log('Cosigning...');
         // hopper.cosign();
 
         // hopper.view();
 
-        hopper.fire();
-
+        //if hopper not empty
+        if (filteredVotes.length > 0) {
+            hopper.fire();
+        }
+        
     }
 
 }
