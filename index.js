@@ -1,45 +1,81 @@
 //env
-require('dotenv').config()
+require('dotenv').config();
 
 //db
-const low = require('lowdb')
-const FileSync = require('lowdb/adapters/FileSync')
-const adapter = new FileSync('db.json')
-const db = low(adapter)
+const low = require('lowdb');
+const FileSync = require('lowdb/adapters/FileSync');
+const adapter = new FileSync('db.json');
+const db = low(adapter);
+
+//authority provider
+const CosignAuthorityProvider = require('./CosignAuthorityProvider');
 
 //eosjs
 const { Api, JsonRpc, RpcError } = require('eosjs');
 const { JsSignatureProvider } = require('eosjs/dist/eosjs-jssig'); //development only
 const fetch = require('node-fetch'); //node only; not needed in browsers
 const { TextEncoder, TextDecoder } = require('util'); //node only; native TextEncoder/Decoder
-const defaultPrivateKey =  process.env.WORKER_PRIV_KEY || "5JtUScZK2XEp3g9gh7F8bwtPTRAkASmNrrftmx4AxDKD5K4zDnr";
+const defaultPrivateKey = process.env.WORKER_PRIV_KEY;
 const signatureProvider = new JsSignatureProvider([defaultPrivateKey]);
-const rpc = new JsonRpc('https://testnet.telos.caleos.io', { fetch });
-const api = new Api({ rpc, signatureProvider, textDecoder: new TextDecoder(), textEncoder: new TextEncoder() });
+const rpc = new JsonRpc(process.env.RPC_ENDPOINT, { fetch });
+const api = new Api({ rpc, authorityProvider: new CosignAuthorityProvider(rpc), signatureProvider, textDecoder: new TextDecoder(), textEncoder: new TextEncoder() });
+
+//action hopper
+const ActionHopper = require('./ActionHopper');
+const hopper = new ActionHopper(process.env.WORKER_ACCT_NAME, api);
 
 //hyperion
 const HyperionSocketClient = require('@eosrio/hyperion-stream-client').default;
-const client = new HyperionSocketClient('https://testnet.telosusa.io', {async: false});
+const client = new HyperionSocketClient(process.env.HYPERION_ENDPOINT, { async: false });
 
+//define db
 const dbSchema = {
     config: {
-        last_job_id: 1
+        worker_account: process.env.WORKER_ACCT_NAME,
+        pub_key: process.env.WORKER_PUB_KEY
     },
-    worker: {
-        account: process.env.WORKER_ACCT_NAME || 'decideworker',
-        pub_key: process.env.WORKER_PUB_KEY || 'EOS5bbCLHnJ7jU1RWdFY7g5LoeCGCVRhtRjpZdKB9FxNx8xtoi3pA',
-        status: 'Initializing'
-    },
-    watching: []
+    ballots: [],
+    watchlist: []
 };
 
 //set db defaults
 db.defaults(dbSchema)
-  .write()
+    .write()
 
+//define streams to watch
 client.onConnect = () => {
 
-    //delta stream
+    //openvoting action stream
+    // client.streamActions({
+    //     contract: 'telos.decide',
+    //     action: 'openvoting',
+    //     account: '',
+    //     start_from: 0,
+    //     read_until: 0,
+    //     filters: [],
+    // });
+
+    //closevoting action stream
+    // client.streamActions({
+    //     contract: 'telos.decide',
+    //     action: 'closevoting',
+    //     account: '',
+    //     start_from: 0,
+    //     read_until: 0,
+    //     filters: [],
+    // });
+
+    //castvote action stream
+    client.streamActions({
+        contract: 'telos.decide',
+        action: 'castvote',
+        account: '',
+        start_from: 0,
+        read_until: 0,
+        filters: [],
+    });
+
+    //voters table delta stream
     client.streamDeltas(
         {
             code: 'telos.decide',
@@ -51,101 +87,131 @@ client.onConnect = () => {
         }
     );
 
-    //action stream
-    client.streamActions({
-        contract: 'telos.decide',
-        action: 'castvote',
-        account: '',
-        start_from: 0,
-        read_until: 0,
-        filters: [],
-    });
-
 }
 
+//handle stream data
 client.onData = async (data) => {
 
     //if action stream
     if (data.type == 'action') {
 
         console.log('>>> Action Received:');
-        // console.log(data.content.act.data);
 
-        let voter = data.content.act.data.voter;
-        let ballot = data.content.act.data.ballot_name;
+        //initialize
+        const actionName = data.content.act.name;
 
-        //find existing voter
-        let res = db.get('watching')
-            .find({ account_name: voter })
-            .size()
-            .value()
+        //perform task based on action name
+        switch (actionName) {
+            case 'openvoting':
+                //TASK: add ballot to ballots list in db
 
-        // console.log('res: ', res)
+                //initialize
+                const ballot = data.content.act.ballot_name;
+                const endTime = data.content.act.end_time;
 
-        //voter found
-        if (res != 0) {
+                //validate
+                //TODO: check ballot is VOTE
 
-            console.log('Voter Found. Finding Ballot...');
-
-            //find existing ballot name
-            let res2 = db.get('watching')
-                .find({ account_name: voter })
-                .get('active_ballots')
-                .find({ ballot_name: ballot })
-                .size()
-                .value()
-
-            console.log('res2: ', res2);
-
-            //ballot found
-            if (res2 != 0) {
-
-                console.log('Ballot Found. Skipping.');
-
-            } else { //ballot not found
-
-                console.log('Ballot Not Found. Adding...');
-
-                const new_bal_entry = {
-                    ballot_name: ballot
+                //define new ballot
+                const newBallot = {
+                    ballot_name: ballot,
+                    end_time: endTime
                 };
-    
-                db.get('watching')
-                    .find({ account_name: voter })
-                    .get('active_ballots')
-                    .push(new_bal_entry)
+
+                //write new ballot
+                db.get('ballots')
+                    .push(newBallot)
                     .write()
 
-                console.log('Ballot Added.');
+                break;
+            case 'closevoting':
+                //TASK: remove ballot from ballots list in db
 
-            }
+                //initialize
+                const ballot = data.content.act.ballot_name;
+                // const did_broadcast = data.content.act.broadcast;
 
-            //update existing entry
-            // db.get('watching')
-            //     .find({ account_name: voter })
-            //     .get('active_ballots')
-            //     .push({ ballot_name: ballot})
-            //     .write()
+                //validate
+                //TODO: check ballot is VOTE
 
-        } else { //voter not found
+                //remove ballot from list
+                db.get('ballots')
+                    .remove({ ballot_name: ballot })
+                    .write()
 
-            console.log('Voter Not Found. Adding...');
+                break;
+            case 'castvote':
+                //TASK: add vote to watchlist if not exists
 
-            const new_voter_entry = {
-                account_name: voter,
-                active_ballots: [
-                    {
-                        ballot_name: ballot
-                    }    
-                ]
-            };
+                //initialize
+                const voter = data.content.act.data.voter;
+                const ballot = data.content.act.data.ballot_name;
 
-            db.get('watching')
-                .push(new_voter_entry)
-                .write()
+                //validate
+                //TODO: check ballot is VOTE from db
 
-            console.log('Voter Added.');
-        
+                //check for existing voter on watchlist
+                const res = db.get('watchlist')
+                    .find({ account_name: voter })
+                    .size()
+                    .value()
+
+                //if account found on watchlist
+                if (res != 0) {
+
+                    //check for existing vote
+                    const res2 = db.get('watchlist')
+                        .find({ account_name: voter })
+                        .get('votes')
+                        .find({ ballot_name: ballot })
+                        .size()
+                        .value()
+
+                    //if vote not found
+                    if (res2 == 0) {
+
+                        //define new vote entry
+                        const new_vote_entry = {
+                            ballot_name: ballot
+                        };
+
+                        //add vote to watchlist
+                        db.get('watchlist')
+                            .find({ account_name: voter })
+                            .get('votes')
+                            .push(new_vote_entry)
+                            .write()
+
+                    } else { //if vote found
+
+                        console.log('Vote Found. Skipping.');
+
+                        //TODO: check ballot status. if ended, remove ballot entry.
+
+                    }
+
+                } else { //if account not found on watchlist
+
+                    //define new voter
+                    const new_voter = {
+                        account_name: voter,
+                        votes: [
+                            {
+                                ballot_name: ballot
+                            }
+                        ]
+                    };
+
+                    //write new voter to watchlist
+                    db.get('watchlist')
+                        .push(new_voter)
+                        .write()
+
+                }
+
+                break;
+            default:
+                console.error('Action Not Found', actionName);
         }
 
     }
@@ -153,15 +219,77 @@ client.onData = async (data) => {
     //if delta stream
     if (data.type == 'delta') {
 
-        console.log('>>> Delta Received:');
-        console.log(data);
+        console.log('>>> Table Delta Received: ');
 
-        
+        // console.log(data);
+
+        //initialize
+        const voter = data.content.scope;
+
+        //get config info
+        const conf = db.get('config')
+            .value()
+
+        //get account's vote list
+        const ballot_list = db.get('watchlist')
+            .find({ account_name: voter })
+            .get('votes')
+            .value()
+
+        //load action hopper
+        ballot_list.forEach(element => {
+
+            //define rebal action
+            let rebal_action = {
+                account: 'telos.decide',
+                name: 'rebalance',
+                authorization: [
+                    {
+                        actor: conf.worker_account,
+                        permission: 'active',
+                    }
+                ],
+                data: {
+                    voter: voter,
+                    ballot_name: element.ballot_name,
+                    worker: conf.worker_account
+                }
+            }
+
+            //push action to hopper
+            hopper.load(rebal_action);
+
+        });
+
+        // const cosign_action = {
+        //     account: 'energytester',
+        //     name: 'cosign',
+        //     authorization: [
+        //         {
+        //             actor: 'energytester',
+        //             permission: 'active',
+        //         }
+        //     ],
+        //     data: {
+        //         account_owner: 'decideworker'
+        //     }
+        // };
+
+        // hopper.frontload(cosign_action);
+
+        // console.log('Cosigning...');
+        // hopper.cosign();
+
+        // hopper.view();
+
+        hopper.fire();
 
     }
 
 }
 
+//connect to stream(s)
 client.connect(() => {
-    console.log('Worker node connected');
+    console.log('Worker Node ONLINE');
+    console.log('Streaming from', process.env.CHAIN_NAME);
 });

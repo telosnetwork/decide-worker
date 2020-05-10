@@ -20,6 +20,7 @@
     "@eosrio/hyperion-stream-client": "^0.3.4",
     "dotenv": "^8.2.0",
     "eosjs": "^20.0.3",
-    "lowdb": "^1.0.0"
+    "lowdb": "^1.0.0",
+    "node-fetch": "^2.6.0"
   }
 }
