@@ -316,4 +316,44 @@ client.onData = async (data) => {
 client.connect(() => {
     console.log('Worker Node ONLINE');
     console.log('Streaming from', process.env.CHAIN_NAME);
+
+    (async () => {
+
+        //TODO: get ballots by end time
+        const res = await rpc.get_table_rows({
+            json: true,               // Get the response as json
+            code: 'telos.decide',      // Contract that we target
+            scope: 'telos.decide',    // Account that owns the data
+            table: 'ballots',        // Table name
+            limit: 50,                // Maximum number of rows that we want to get
+            reverse: false,           // Optional: Get reversed data
+            show_payer: false          // Optional: Show ram payer
+        });
+
+        //initialize
+        const newBallotsList = [];
+
+        //for each ballot
+        res.rows.forEach(element => {
+            //if symbol is 4,VOTE and status is voting
+            if (element.treasury_symbol == '4,VOTE' && element.status == 'voting') {
+                //define new ballot
+                const newBallot = {
+                    ballot_name: element.ballot_name,
+                    end_time: element.end_time
+                };
+
+                //push new ballot into list
+                newBallotsList.push(newBallot);
+            }
+        })
+
+        //init ballots list in db
+        db.set('ballots', newBallotsList)
+            .write()
+
+        console.log('Ballots Synced');
+
+    })();
+
 });

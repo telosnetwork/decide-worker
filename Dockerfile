@@ -8,7 +8,7 @@ WORKDIR /usr/src/app
 # ENV PATH /usr/src/app/node_modules/.bin:$PATH
 
 # copy files into working directory
-COPY package*.json /usr/src/app/package.json
+COPY package*.json /usr/src/app/
 
 # install dependencies
 RUN npm install
