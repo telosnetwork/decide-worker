@@ -85,8 +85,15 @@ module.exports = class ActionHopper {
       expireSeconds: 30,
     });
 
-    console.log('Transaction Executed:', res.transaction_id);
+    //if trx executed
+    if (res.processed.receipt.status == 'executed') {
+      console.log('Transaction Executed:', res.transaction_id);
+    } else {
+      //TODO: report error
+      console.log('Transaction Error');
+    }
 
+    //clear hopper
     this.clear();
   }
 

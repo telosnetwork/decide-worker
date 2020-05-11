@@ -65,6 +65,8 @@ client.onConnect = () => {
     //     filters: [],
     // });
 
+    //TODO: cancelballot action stream
+
     //castvote action stream
     client.streamActions({
         contract: 'telos.decide',
@@ -119,6 +121,8 @@ client.onData = async (data) => {
                     .push(newBallot)
                     .write()
 
+                console.log('Ballot added to list');
+
                 break;
             case 'closevoting':
                 //TASK: remove ballot from ballots list in db
@@ -130,6 +134,8 @@ client.onData = async (data) => {
                 db.get('ballots')
                     .remove({ ballot_name: data.content.act.ballot_name })
                     .write()
+
+                console.log('Ballot removed from list');
 
                 break;
             case 'castvote':
@@ -174,6 +180,8 @@ client.onData = async (data) => {
                             .push(new_vote)
                             .write()
 
+                        console.log('Vote added to account');
+
                     } else { //if vote found
 
                         console.log('Vote Found. Skipping.');
@@ -199,6 +207,8 @@ client.onData = async (data) => {
                         .push(new_voter)
                         .write()
 
+                    console.log('Account added to watchlist');
+
                 }
 
                 break;
@@ -214,7 +224,7 @@ client.onData = async (data) => {
         console.log('>>> Table Delta Received: ');
 
         //initialize
-        const voter = data.content.scope;
+        const voterAccount = data.content.scope;
         let didFilter = false;
         let filteredVotes = [];
 
@@ -224,19 +234,25 @@ client.onData = async (data) => {
 
         //get account's vote list
         const votesList = db.get('watchlist')
-            .find({ account_name: voter })
+            .find({ account_name: voterAccount })
             .get('votes')
             .value()
 
-        //filter votes list
+        //if account not found
+        if (votesList == undefined) {
+            console.log('Account Not Found');
+            return;
+        }
+
+        //filter each vote on account
         votesList.forEach(element => {
-            //get ballot
+            //get ballot from db
             const ballotQuery = db.get('ballots')
                 .find({ ballot_name: element.ballot_name })
                 .value()
 
-            //if ballotQuery not undefined (in votes list but not ballots list)
-            if (ballotQuery) {
+            //if ballot found
+            if (ballotQuery != undefined) {
                 //if ballot still active
                 if (Date.now() < Date.parse(ballotQuery.end_time)) {
                     //define vote
@@ -248,10 +264,12 @@ client.onData = async (data) => {
                 } else {
                     didFilter = true;
                 }
-            } else { //ballot undefined
+            } else { //ballot not found
                 //TODO: fetch ballot from chain and add to db
             }
         });
+
+        //--------------------------------------
 
         //load action hopper
         filteredVotes.forEach(element => {
@@ -266,7 +284,7 @@ client.onData = async (data) => {
                     }
                 ],
                 data: {
-                    voter: voter,
+                    voter: voterAccount,
                     ballot_name: element.ballot_name,
                     worker: conf.worker_account
                 }
@@ -274,15 +292,6 @@ client.onData = async (data) => {
             //push action to hopper
             hopper.load(rebal_action);
         });
-
-        //if votes were filtered from vote list
-        if (didFilter) {
-            //set filteredVotes as new votes
-            db.get('watchlist')
-                .find({ account_name: voter })
-                .set('votes', filteredVotes)
-                .write()
-        }
 
         // const cosign_action = {
         //     account: 'energytester',
@@ -304,10 +313,20 @@ client.onData = async (data) => {
         // hopper.view();
 
         //if hopper not empty
-        if (filteredVotes.length > 0) {
+        if (hopper.getHopper().length > 0) {
+            //sign and broadcast
             hopper.fire();
         }
-        
+
+        //if votes were filtered from vote list
+        if (didFilter) {
+            //set filteredVotes as new votes
+            db.get('watchlist')
+                .find({ account_name: voterAccount })
+                .set('votes', filteredVotes)
+                .write()
+        }
+
     }
 
 }
