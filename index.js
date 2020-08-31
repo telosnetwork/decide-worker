@@ -42,12 +42,130 @@ const dbSchema = {
 db.defaults(dbSchema)
     .write()
 
+syncBallots = async () => {
+    //TODO: get ballots by end time instead
+    const res = await rpc.get_table_rows({
+        json: true,
+        code: process.env.GOV_ENGINE_ACCT,
+        scope: process.env.GOV_ENGINE_ACCT,
+        table: 'ballots',
+        limit: 100,
+        reverse: false,
+        show_payer: false
+    });
+
+    //initialize
+    const newBallotsList = [];
+
+    //loop over each ballot returned from query
+    res.rows.forEach(element => {
+        //if symbol is 4,VOTE and status is voting
+        if (element.treasury_symbol == '4,VOTE' && element.status == 'voting') {
+            //define new ballot
+            const newBallot = {
+                ballot_name: element.ballot_name,
+                end_time: element.end_time
+            };
+
+            //push new ballot into list
+            newBallotsList.push(newBallot);
+        }
+    })
+
+    //write ballots list to db
+    db.set('ballots', newBallotsList)
+        .write()
+
+    console.log('Ballots Synced');
+}
+
+syncVotes = async () => {
+    //get ballots from db
+    let bals = db.get('ballots')
+        .value();
+
+    //sync votes for each ballot in db
+    bals.forEach(async element => {
+        //query for votes on ballot
+        const res = await rpc.get_table_rows({
+            json: true,
+            code: process.env.GOV_ENGINE_ACCT,
+            scope: element.ballot_name,
+            table: 'votes',
+            limit: 100,
+            reverse: false,
+            show_payer: false
+        });
+
+        //save votes to watchlist
+        res.rows.forEach(vote => {
+
+            //check db for account in watchlist
+            const res2 = db.get('watchlist')
+                .find({ account_name: vote.voter })
+                .size()
+                .value()
+
+            //if account not in watchlist
+            if (res2 == 0) {
+                //define new voter
+                const new_voter = {
+                    account_name: vote.voter,
+                    votes: [
+                        {
+                            ballot_name: element.ballot_name
+                        }
+                    ]
+                };
+
+                //write new voter to watchlist
+                db.get('watchlist')
+                    .push(new_voter)
+                    .write()
+            } else { //account found in watchlist
+                //check db for existing vote
+                const res3 = db.get('watchlist')
+                    .find({ account_name: vote.voter })
+                    .get('votes')
+                    .find({ ballot_name: element.ballot_name })
+                    .size()
+                    .value()
+            
+                //if existing vote not found in db
+                if (res3 == 0) {
+                    console.log(`adding vote from ${vote.voter} to ${element.ballot_name}`)
+
+                    //define new vote
+                    const new_vote = {
+                        ballot_name: element.ballot_name
+                    };
+
+                    //add vote to watchlist
+                    db.get('watchlist')
+                        .find({ account_name: vote.voter })
+                        .get('votes')
+                        .push(new_vote)
+                        .write()
+                }
+            }
+        })
+    })
+
+    console.log('Votes Synced')
+}
+
+startup = async () => {
+    console.log("Starting up...");
+    await syncBallots();
+    await syncVotes();
+}
+
 //define streams to watch
 client.onConnect = () => {
 
     //openvoting action stream
     client.streamActions({
-        contract: 'telos.decide',
+        contract: process.env.GOV_ENGINE_ACCT,
         action: 'openvoting',
         account: '',
         start_from: 0,
@@ -96,7 +214,6 @@ client.onData = async (data) => {
 
     //if action stream
     if (data.type == 'action') {
-
         console.log('>>> Action Received:');
 
         //initialize
@@ -331,48 +448,12 @@ client.onData = async (data) => {
 
 }
 
+//===== initialize =====
+
+startup();
+
 //connect to stream(s)
 client.connect(() => {
     console.log('Worker Node ONLINE');
     console.log('Streaming from', process.env.CHAIN_NAME);
-
-    (async () => {
-
-        //TODO: get ballots by end time
-        const res = await rpc.get_table_rows({
-            json: true,               // Get the response as json
-            code: 'telos.decide',      // Contract that we target
-            scope: 'telos.decide',    // Account that owns the data
-            table: 'ballots',        // Table name
-            limit: 50,                // Maximum number of rows that we want to get
-            reverse: false,           // Optional: Get reversed data
-            show_payer: false          // Optional: Show ram payer
-        });
-
-        //initialize
-        const newBallotsList = [];
-
-        //for each ballot
-        res.rows.forEach(element => {
-            //if symbol is 4,VOTE and status is voting
-            if (element.treasury_symbol == '4,VOTE' && element.status == 'voting') {
-                //define new ballot
-                const newBallot = {
-                    ballot_name: element.ballot_name,
-                    end_time: element.end_time
-                };
-
-                //push new ballot into list
-                newBallotsList.push(newBallot);
-            }
-        })
-
-        //init ballots list in db
-        db.set('ballots', newBallotsList)
-            .write()
-
-        console.log('Ballots Synced');
-
-    })();
-
 });
