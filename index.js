@@ -133,7 +133,7 @@ syncVotes = async () => {
             
                 //if existing vote not found in db
                 if (res3 == 0) {
-                    console.log(`adding vote from ${vote.voter} to ${element.ballot_name}`)
+                    // console.log(`adding vote from ${vote.voter} to ${element.ballot_name}`)
 
                     //define new vote
                     const new_vote = {
@@ -156,8 +156,10 @@ syncVotes = async () => {
 
 startup = async () => {
     console.log("Starting up...");
-    await syncBallots();
-    await syncVotes();
+    if (process.env.SYNC_ON_STARTUP) {
+        await syncBallots();
+        await syncVotes();
+    }
 }
 
 //define streams to watch
@@ -196,16 +198,14 @@ client.onConnect = () => {
     });
 
     //voters table delta stream
-    client.streamDeltas(
-        {
-            code: 'telos.decide',
-            table: 'voters',
-            scope: '*',
-            payer: '',
-            start_from: 0,
-            read_until: 0,
-        }
-    );
+    client.streamDeltas({
+        code: 'telos.decide',
+        table: 'voters',
+        scope: '*',
+        payer: '',
+        start_from: 0,
+        read_until: 0,
+    });
 
 }
 
@@ -337,8 +337,7 @@ client.onData = async (data) => {
 
     //if delta stream
     if (data.type == 'delta') {
-
-        console.log('>>> Table Delta Received: ');
+        // console.log('>>> Table Delta Received: ');
 
         //initialize
         const voterAccount = data.content.scope;
@@ -357,7 +356,7 @@ client.onData = async (data) => {
 
         //if account not found
         if (votesList == undefined) {
-            console.log('Account Not Found');
+            // console.log('Account Not Found');
             return;
         }
 

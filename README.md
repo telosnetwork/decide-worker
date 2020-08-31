@@ -33,6 +33,8 @@ HYPERION_ENDPOINT=
 
 - HYPERION_ENDPOINT: Hyperion Stream endpoint for listening to Governance Engine actions.
 
+- SYNC_ON_STARTUP: true to sync decide state to db on startup, false to skip
+
 ## Run Docker
 
 Run the docker container by executing the dockerfile:
