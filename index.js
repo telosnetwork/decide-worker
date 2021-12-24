@@ -175,16 +175,35 @@ rebalanceAll = async (ballotMap) => {
 			let rebal_action = getRebalanceAction(voterAccount, ballotName);
 			//push action to hopper
 			hopper.load(rebal_action);
-			try {
-				await hopper.fire();
-			} catch (e) {
-				if (e.message.endsWith("vote has already expired"))
-					hopper.clear();
-				else
-					console.log("ERROR: " + e.message);
-			}
+			await fireHopper();
 		}
 
+	}
+}
+
+refreshRebalance = async (voter, ballot) => {
+	const refreshAction = getRefreshAction(voter);
+	hopper.load(refreshAction);
+	await fireHopper();
+
+	const rebalanceAction = getRebalanceAction(voter, ballot);
+	hopper.load(rebalanceAction);
+	await fireHopper();
+}
+
+getRefreshAction = (voterAccount) => {
+	return {
+		account: 'telos.decide',
+		name: 'refresh',
+		authorization: [
+			{
+				actor: conf.worker_account,
+				permission: 'active',
+			}
+		],
+		data: {
+			voter: voterAccount
+		}
 	}
 }
 
@@ -206,19 +225,14 @@ getRebalanceAction = (voterAccount, ballotName) => {
 	}
 }
 
-getRefreshAction = (voterAccount) => {
-	return {
-		account: 'telos.decide',
-		name: 'refresh',
-		authorization: [
-			{
-				actor: conf.worker_account,
-				permission: 'active',
-			}
-		],
-		data: {
-			voter: voterAccount
-		}
+fireHopper = async () => {
+	try {
+		await hopper.fire();
+	} catch (e) {
+		if (e.message.endsWith("vote has already expired"))
+			hopper.clear();
+		else
+			console.log("ERROR: " + e.message);
 	}
 }
 
@@ -374,6 +388,8 @@ client.onData = async (data, ack) => {
 
 						console.log('Vote added to account');
 
+						await refreshRebalance(voter, ballot);
+
 					} else { //if vote found
 
 						//console.log('Vote Found. Skipping.');
@@ -401,6 +417,7 @@ client.onData = async (data, ack) => {
 
 					console.log('Account added to watchlist');
 
+					await refreshRebalance(voter, ballot);
 				}
 
 				break;
@@ -497,7 +514,7 @@ client.onData = async (data, ack) => {
 		//if hopper not empty
 		if (hopper.getHopper().length > 0) {
 			//sign and broadcast
-			await hopper.fire();
+			await fireHopper();
 			await new Promise(resolve => setTimeout(resolve, 500));
 		}
 
@@ -513,8 +530,6 @@ client.onData = async (data, ack) => {
 	}
 	ack();
 }
-
-refreshAction
 
 //===== initialize =====
 
