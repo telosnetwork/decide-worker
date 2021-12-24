@@ -164,18 +164,13 @@ syncVotes = async () => {
 	return ballotMap;
 }
 
-rebalanceAll = async (ballotMap) => {
-	const conf = db.get('config')
-		.value();
-	console.log("JESSE: ");
-	console.dir(ballotMap);
+refreshRebalanceAll = async (ballotMap) => {
+	const conf = db.get('config').value();
 	for (let ballotName in ballotMap) {
 		for (const voterAccount of ballotMap[ballotName]) {
 			console.log(`${ballotName} :: ${voterAccount}`);
-			let rebal_action = getRebalanceAction(voterAccount, ballotName);
-			await fireHopper(rebel_action);
+			await refreshRebalance(voterAccount, ballotName);
 		}
-
 	}
 }
 
@@ -246,10 +241,8 @@ startup = async () => {
 			.subtract(30, "days")
 			.format("YYYY-MM-DDTHH:mm:ss.SSS[Z]");
 		await syncBallots();
-		let ballotMap = await syncVotes();
-		console.dir(ballotMap);
-		rebalanceAll(ballotMap);
-
+		const ballotMap = await syncVotes();
+		await refreshRebalanceAll(ballotMap);
 	}
 }
 
