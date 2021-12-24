@@ -173,9 +173,7 @@ rebalanceAll = async (ballotMap) => {
 		for (const voterAccount of ballotMap[ballotName]) {
 			console.log(`${ballotName} :: ${voterAccount}`);
 			let rebal_action = getRebalanceAction(voterAccount, ballotName);
-			//push action to hopper
-			hopper.load(rebal_action);
-			await fireHopper();
+			await fireHopper(rebel_action);
 		}
 
 	}
@@ -183,15 +181,14 @@ rebalanceAll = async (ballotMap) => {
 
 refreshRebalance = async (voter, ballot) => {
 	const refreshAction = getRefreshAction(voter);
-	hopper.load(refreshAction);
-	await fireHopper();
+	await fireHopper(refreshAction);
 
 	const rebalanceAction = getRebalanceAction(voter, ballot);
-	hopper.load(rebalanceAction);
-	await fireHopper();
+	await fireHopper(rebalanceAction);
 }
 
 getRefreshAction = (voterAccount) => {
+	const conf = db.get('config').value();
 	return {
 		account: 'telos.decide',
 		name: 'refresh',
@@ -208,6 +205,7 @@ getRefreshAction = (voterAccount) => {
 }
 
 getRebalanceAction = (voterAccount, ballotName) => {
+	const conf = db.get('config').value();
 	return {
 		account: 'telos.decide',
 		name: 'rebalance',
@@ -225,8 +223,11 @@ getRebalanceAction = (voterAccount, ballotName) => {
 	}
 }
 
-fireHopper = async () => {
+fireHopper = async (rebelAction) => {
 	try {
+		if (rebelAction !== undefined){
+			hopper.load(rebalAction);
+		}
 		await hopper.fire();
 	} catch (e) {
 		if (e.message.endsWith("vote has already expired"))
@@ -246,6 +247,7 @@ startup = async () => {
 			.format("YYYY-MM-DDTHH:mm:ss.SSS[Z]");
 		await syncBallots();
 		let ballotMap = await syncVotes();
+		console.dir(ballotMap);
 		rebalanceAll(ballotMap);
 
 	}
@@ -435,10 +437,6 @@ client.onData = async (data, ack) => {
 		const voterAccount = data.content.scope;
 		let didFilter = false;
 		let filteredVotes = [];
-
-		//get config info
-		const conf = db.get('config')
-			.value()
 
 		//get account's vote list
 		const votesList = db.get('watchlist')
