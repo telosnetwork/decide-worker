@@ -221,7 +221,7 @@ getRebalanceAction = (voterAccount, ballotName) => {
 fireHopper = async (rebelAction) => {
 	try {
 		if (rebelAction !== undefined){
-			hopper.load(rebalAction);
+			hopper.load(rebelAction);
 		}
 		await hopper.fire();
 	} catch (e) {
