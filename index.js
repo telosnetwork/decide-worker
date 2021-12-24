@@ -172,21 +172,7 @@ rebalanceAll = async (ballotMap) => {
 	for (let ballotName in ballotMap) {
 		for (const voterAccount of ballotMap[ballotName]) {
 			console.log(`${ballotName} :: ${voterAccount}`);
-			let rebal_action = {
-				account: 'telos.decide',
-				name: 'rebalance',
-				authorization: [
-					{
-						actor: conf.worker_account,
-						permission: 'active',
-					}
-				],
-				data: {
-					voter: voterAccount,
-					ballot_name: ballotName,
-					worker: conf.worker_account
-				}
-			}
+			let rebal_action = getRebalanceAction(voterAccount, ballotName);
 			//push action to hopper
 			hopper.load(rebal_action);
 			try {
@@ -199,6 +185,40 @@ rebalanceAll = async (ballotMap) => {
 			}
 		}
 
+	}
+}
+
+getRebalanceAction = (voterAccount, ballotName) => {
+	return {
+		account: 'telos.decide',
+		name: 'rebalance',
+		authorization: [
+			{
+				actor: conf.worker_account,
+				permission: 'active',
+			}
+		],
+		data: {
+			voter: voterAccount,
+			ballot_name: ballotName,
+			worker: conf.worker_account
+		}
+	}
+}
+
+getRefreshAction = (voterAccount) => {
+	return {
+		account: 'telos.decide',
+		name: 'refresh',
+		authorization: [
+			{
+				actor: conf.worker_account,
+				permission: 'active',
+			}
+		],
+		data: {
+			voter: voterAccount
+		}
 	}
 }
 
@@ -449,21 +469,7 @@ client.onData = async (data, ack) => {
 			console.log(seenId);
 			if (!seen.includes(seenId)) {
 				seen.push(seenId);
-				let rebal_action = {
-					account: 'telos.decide',
-					name: 'rebalance',
-					authorization: [
-						{
-							actor: conf.worker_account,
-							permission: 'active',
-						}
-					],
-					data: {
-						voter: voterAccount,
-						ballot_name: element.ballot_name,
-						worker: conf.worker_account
-					}
-				}
+				let rebal_action = getRebalanceAction(voterAccount, element.ballot_name);
 				//push action to hopper
 				hopper.load(rebal_action);
 			}
@@ -507,6 +513,8 @@ client.onData = async (data, ack) => {
 	}
 	ack();
 }
+
+refreshAction
 
 //===== initialize =====
 
